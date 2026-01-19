@@ -1,0 +1,9 @@
+app = "tikdownloader"    # le nom de ton app sur Fly.io
+kill_signal = "SIGINT"
+kill_timeout = 5
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
