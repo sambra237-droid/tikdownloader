@@ -1,7 +1,7 @@
 # Image Python officielle
 FROM python:3.11-slim
 
-# Mettre à jour et installer dépendances système
+# Installer dépendances système
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
@@ -9,18 +9,20 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Définir le répertoire de travail
+# Répertoire de travail
 WORKDIR /main
 
-# Copier les fichiers nécessaires
+# Copier fichiers
 COPY requirements.txt .
-COPY main.py .  # assure-toi que ton fichier s'appelle app.py
+COPY main.py .   # ton code est déjà dans main.py
 
-# Installer les dépendances Python
+# Installer dépendances Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Exposer le port utilisé par Railway
+# Exposer le port utilisé par Fly.io / Railway
 EXPOSE 8080
 
-# Lancer Flask via gunicorn pour production
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
+# Lancer Flask via Gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "main:app"]
+
+
