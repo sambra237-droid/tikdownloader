@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, Response, stream_with_context
 import yt_dlp
 import re
 import requests
+import os
 
 app = Flask(__name__)
 
@@ -13,6 +14,10 @@ def is_valid_tiktok_url(url: str) -> bool:
 
 
 def select_best_format(formats, watermark_required: bool):
+    """
+    Sélectionne le meilleur format MP4
+    Priorité : sans watermark, puis fallback avec watermark
+    """
     candidates = []
 
     for f in formats:
@@ -29,16 +34,28 @@ def select_best_format(formats, watermark_required: bool):
     if not candidates:
         return None
 
-    # meilleure résolution
     return max(candidates, key=lambda f: f.get("height") or 0)
 
 
 # -----------------------------
 # Routes
 # -----------------------------
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "status": "ok",
+        "service": "TikTok Downloader API"
+    })
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
+
+
 @app.route("/tiktok/stream", methods=["POST"])
 def stream_tiktok():
-    data = request.get_json()
+    data = request.get_json(silent=True)
     if not data or "url" not in data:
         return jsonify({"error": "Missing url"}), 400
 
@@ -51,7 +68,7 @@ def stream_tiktok():
         "quiet": True,
         "skip_download": True,
         "nocheckcertificate": True,
-        # ❌ PRODUCTION: ne pas utiliser cookiesfrombrowser
+        "extract_flat": False,
         "user_agent": (
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 "
@@ -60,7 +77,7 @@ def stream_tiktok():
     }
 
     try:
-        # 1️⃣ Extraction infos vidéo
+        # 1️⃣ Extraction des infos TikTok
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
@@ -70,21 +87,26 @@ def stream_tiktok():
 
         # 2️⃣ Priorité sans watermark
         selected = select_best_format(formats, watermark_required=False)
+        watermark = False
+
         if not selected:
             selected = select_best_format(formats, watermark_required=True)
+            watermark = True
 
         if not selected or "url" not in selected:
             return jsonify({"error": "No playable video"}), 404
 
         video_url = selected["url"]
 
+        # 3️⃣ Headers réalistes (obligatoire pour TikTok CDN)
         headers = {
             "User-Agent": ydl_opts["user_agent"],
             "Referer": "https://www.tiktok.com/",
             "Accept": "*/*",
+            "Accept-Encoding": "identity",
         }
 
-        # 3️⃣ Streaming depuis CDN TikTok
+        # 4️⃣ Connexion au CDN TikTok
         r = requests.get(
             video_url,
             headers=headers,
@@ -93,9 +115,9 @@ def stream_tiktok():
             allow_redirects=True,
         )
 
-        # 4️⃣ Vérifie que TikTok n’a pas bloqué la connexion
         content_type = r.headers.get("Content-Type", "")
         if r.status_code != 200 or "video" not in content_type:
+            r.close()
             return jsonify({
                 "error": "TikTok CDN blocked this server/IP",
                 "status_code": r.status_code,
@@ -118,6 +140,7 @@ def stream_tiktok():
                 "Content-Disposition": "attachment; filename=tiktok.mp4",
                 "Accept-Ranges": "bytes",
                 "Cache-Control": "no-cache",
+                "X-Watermark": str(watermark).lower(),
             },
         )
 
@@ -134,18 +157,14 @@ def stream_tiktok():
         }), 500
 
 
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"})
-
-
 # -----------------------------
-# Run
+# Run (local uniquement)
 # -----------------------------
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=False)  # debug=False en prod
+    app.run(host="0.0.0.0", port=port, debug=False)
+
+
 
 
 
